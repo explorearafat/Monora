@@ -1,0 +1,75 @@
+name: monora
+description: "Monora — Your sound. Your space. A warm, local-first music player."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^3.4.3
+  just_audio: ^0.10.6
+  just_audio_background: ^0.0.1-beta.17
+  on_audio_query: ^2.9.0
+  permission_handler: ^13.0.2
+  shared_preferences: ^2.5.6
+  audio_session: ^0.2.4
+  path_provider: ^2.1.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# The published on_audio_query_android plugin predates AGP 8 and has no
+# namespace declaration. This vendored copy is identical except for the
+# namespace, compileSdk bump, and manifest package-attribute removal.
+dependency_overrides:
+  on_audio_query_android:
+    path: packages/on_audio_query_android
+  # 14.1.0 requires the Android 17 (API 37) SDK to compile; 13.0.1 offers the
+  # same method-channel surface against compileSdk 36.
+  permission_handler_android: 13.0.1
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icons/monora_logo.png"
+  adaptive_icon_background: "assets/icons/monora_bg.png"
+  adaptive_icon_foreground: "assets/icons/monora_fg.png"
+  adaptive_icon_monochrome: "assets/icons/monora_fg.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icons/monora_logo.png
+
+  fonts:
+    - family: Playfair
+      fonts:
+        - asset: assets/fonts/PlayfairDisplay-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/PlayfairDisplay-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/PlayfairDisplay-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/PlayfairDisplay-Bold.ttf
+          weight: 700
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
