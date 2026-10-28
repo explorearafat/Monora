@@ -2,7 +2,7 @@ name: monora
 description: "Monora — Your sound. Your space. A warm, local-first music player."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.13.7

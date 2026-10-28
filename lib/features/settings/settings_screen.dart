@@ -127,7 +127,7 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: 26),
           Center(
             child: Text(
-              'Monora 1.0.0 · Your sound. Your space.',
+              'Monora 1.0.1 · Your sound. Your space.',
               style: TextStyle(
                 fontFamily: 'Inter',
                 fontWeight: FontWeight.w500,
