@@ -73,8 +73,13 @@ class PermissionNotifier extends Notifier<PermissionState> {
   }
 
   Future<void> _refresh() async {
-    final status = await Permission.audio.status;
-    state = state.copyWith(audio: _map(status));
+    try {
+      final status = await Permission.audio.status;
+      state = state.copyWith(audio: _map(status));
+    } on Exception {
+      // Platform channel hiccup — leave as undetermined so the permission
+      // screen still renders and the user can tap "Allow audio access".
+    }
   }
 
   LibraryPermissionStatus _map(PermissionStatus status) => switch (status) {
@@ -88,29 +93,39 @@ class PermissionNotifier extends Notifier<PermissionState> {
 
   /// Requests audio access. Returns the resulting library-readiness.
   Future<LibraryPermissionStatus> requestAudio() async {
-    var status = await Permission.audio.request();
-    if (status.isDenied) {
-      // Some Android 12- devices surface storage instead of audio.
-      status = await Permission.storage.request();
+    var status = LibraryPermissionStatus.denied;
+    try {
+      var result = await Permission.audio.request();
+      if (result.isDenied) {
+        // Some Android 12- devices surface storage instead of audio.
+        result = await Permission.storage.request();
+      }
+      status = _map(result);
+    } on Exception {
+      return LibraryPermissionStatus.denied;
     }
-    state = state.copyWith(audio: _map(status));
+    state = state.copyWith(audio: status);
 
     // Best effort: the media notification is better with notification access.
-    if (state.canReadLibrary &&
+    if (status == LibraryPermissionStatus.granted &&
         state.notifications == LibraryPermissionStatus.undetermined) {
-      final notificationStatus = await Permission.notification.status;
-      if (notificationStatus.isDenied) {
-        state = state.copyWith(notifications: LibraryPermissionStatus.denied);
-      } else {
+      try {
+        final notificationStatus = await Permission.notification.status;
         state = state.copyWith(notifications: _map(notificationStatus));
+      } on Exception {
+        // Notifications are optional; leave as-is.
       }
     }
     return state.audio;
   }
 
   Future<void> requestNotifications() async {
-    final status = await Permission.notification.request();
-    state = state.copyWith(notifications: _map(status));
+    try {
+      final status = await Permission.notification.request();
+      state = state.copyWith(notifications: _map(status));
+    } on Exception {
+      // Notifications are optional.
+    }
   }
 
   Future<void> openSystemSettings() => openAppSettings();
