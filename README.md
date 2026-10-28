@@ -4,7 +4,7 @@
 
 Monora is a warm, offline-first music player for Android, built with Flutter. It plays the music already on your device — MP3, FLAC, WAV, AAC — with a beautiful interface, synced lyrics, a real equalizer, and zero accounts or tracking.
 
-**[⬇ Download the latest APK](https://github.com/explorearafat/Monora/releases/latest/download/Monora-1.0.0.apk)** · [Release notes](https://github.com/explorearafat/Monora/releases) · [Website](https://explorearafat.github.io/Monora/)
+**[⬇ Download the latest APK](https://github.com/explorearafat/Monora/releases/latest/download/Monora-1.0.0.apk)** · [Release notes](https://github.com/explorearafat/Monora/releases) · [Website](https://monoramusic.vercel.app)
 
 <p>
   <img src="design/monora_design_showcase.png" alt="The Monora screen set" width="820" />

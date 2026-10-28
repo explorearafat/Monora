@@ -47,3 +47,7 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 /build/\nandroid/build/
+
+# Vercel local config (machine-specific)
+docs/.vercel/
+docs/.env.local
