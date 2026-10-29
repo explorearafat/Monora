@@ -50,10 +50,17 @@ class MonoraAudioHandler extends BaseAudioHandler with SeekHandler {
     // JustAudio restores the released platform player after a stop() on its
     // own; a plain play() resumes the preserved queue.
     await _player.play();
+    // Broadcast immediately instead of waiting for the next stream event so
+    // the Android side always sees the paused→playing transition that starts
+    // the foreground service and the media notification.
+    _broadcastState(_player.playbackEvent);
   }
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() async {
+    await _player.pause();
+    _broadcastState(_player.playbackEvent);
+  }
 
   @override
   Future<void> seek(Duration position, {int? index}) =>

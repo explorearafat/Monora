@@ -61,6 +61,9 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       unawaited(ref.read(recentsProvider.notifier).record(id));
       unawaited(ref.read(playCountsProvider.notifier).increment(id));
       if (track != null) _scrobble(track);
+      // Second chance for the notification permission: if the splash dialog
+      // was missed or dismissed, ask right when it actually matters.
+      unawaited(ref.read(permissionProvider.notifier).ensureNotifications());
     }
   }
 
