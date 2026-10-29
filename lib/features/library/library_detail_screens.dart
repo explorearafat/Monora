@@ -13,9 +13,39 @@ import '../../core/widgets/track_tile.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/player_providers.dart';
 import '../player/player_actions.dart';
+import '../shell/shell_screen.dart' show MiniPlayerBar;
 import 'library_views.dart';
 
-enum TrackListMode { allSongs, favorites, recents }
+enum TrackListMode { allSongs, favorites, recents, mostPlayed, onRepeat }
+
+/// How All Songs lists can be ordered. Indexes persist via [trackSortProvider].
+enum TrackSort { title, recentlyAdded, duration, artist }
+
+const trackSortLabels = <String>[
+  'Title (A–Z)',
+  'Recently added',
+  'Duration',
+  'Artist (A–Z)',
+];
+
+List<Track> sortTracks(List<Track> tracks, int sortIndex) {
+  final sorted = List<Track>.of(tracks);
+  switch (TrackSort.values[sortIndex.clamp(0, TrackSort.values.length - 1)]) {
+    case TrackSort.title:
+      sorted.sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+      );
+    case TrackSort.recentlyAdded:
+      sorted.sort((a, b) => b.dateAdded.compareTo(a.dateAdded));
+    case TrackSort.duration:
+      sorted.sort((a, b) => b.duration.compareTo(a.duration));
+    case TrackSort.artist:
+      sorted.sort(
+        (a, b) => a.artist.toLowerCase().compareTo(b.artist.toLowerCase()),
+      );
+  }
+  return sorted;
+}
 
 /// A generic track-list screen used for All Songs, Favorites, and Recently
 /// Played — a hero header, metadata line, play/shuffle actions, and the list.
@@ -30,39 +60,90 @@ class TrackListScreen extends ConsumerWidget {
     final library = ref.watch(libraryProvider).value;
     final favorites = ref.watch(favoritesProvider);
     final recents = ref.watch(recentTracksProvider);
+    final playCounts = ref.watch(playCountsProvider);
+    final sortIndex = ref.watch(trackSortProvider);
 
     final List<Track> tracks = switch (mode) {
-      TrackListMode.allSongs => library?.tracks ?? const [],
+      TrackListMode.allSongs =>
+        sortTracks(library?.tracks ?? const [], sortIndex),
       TrackListMode.favorites => [
         if (library != null)
           for (final track in library.tracks)
             if (favorites.contains(track.id)) track,
       ],
       TrackListMode.recents => recents,
+      TrackListMode.mostPlayed => [
+        for (final track in [...?library?.tracks])
+          if ((playCounts[track.id] ?? 0) > 0) track,
+      ]
+        ..sort(
+          (a, b) => (playCounts[b.id] ?? 0).compareTo(playCounts[a.id] ?? 0),
+        ),
+      TrackListMode.onRepeat => [
+        for (final track in [...?library?.tracks])
+          if ((playCounts[track.id] ?? 0) >= 3) track,
+      ]
+        ..sort(
+          (a, b) => (playCounts[b.id] ?? 0).compareTo(playCounts[a.id] ?? 0),
+        ),
     };
 
-    return _TrackCollectionScaffold(
+    return TrackCollectionScaffold(
       title: title,
       tracks: tracks,
-      emptyIcon: mode == TrackListMode.favorites
-          ? Icons.favorite_border_rounded
-          : mode == TrackListMode.recents
-          ? Icons.history_rounded
-          : Icons.music_off_rounded,
+      appBarActions: mode == TrackListMode.allSongs
+          ? [
+              IconButton(
+                onPressed: () => _showSortSheet(context, ref),
+                icon: const Icon(Icons.sort_rounded, size: 22),
+                tooltip: 'Sort songs',
+              ),
+            ]
+          : const <Widget>[],
+      emptyIcon: switch (mode) {
+        TrackListMode.favorites => Icons.favorite_border_rounded,
+        TrackListMode.recents => Icons.history_rounded,
+        TrackListMode.mostPlayed => Icons.local_fire_department_rounded,
+        TrackListMode.onRepeat => Icons.all_inclusive_rounded,
+        TrackListMode.allSongs => Icons.music_off_rounded,
+      },
       emptyMessage: switch (mode) {
         TrackListMode.allSongs =>
           'No audio files were found on this device yet.',
         TrackListMode.favorites =>
           'Tap the heart on any song to keep it close.',
         TrackListMode.recents => 'Songs you play will appear here.',
+        TrackListMode.mostPlayed => 'Play some songs and your hits show up here.',
+        TrackListMode.onRepeat =>
+          'Songs you play three or more times land here.',
       },
+    );
+  }
+
+  void _showSortSheet(BuildContext context, WidgetRef ref) {
+    final current = ref.read(trackSortProvider);
+    showOptionSheet(
+      context,
+      title: 'Sort songs',
+      options: [
+        for (var i = 0; i < trackSortLabels.length; i++)
+          OptionSheetItem(
+            icon: i == current
+                ? Icons.radio_button_checked_rounded
+                : Icons.radio_button_off_rounded,
+            label: trackSortLabels[i],
+            onSelected: () =>
+                unawaited(ref.read(trackSortProvider.notifier).set(i)),
+          ),
+      ],
     );
   }
 }
 
 /// Shared scaffold for screens that present a play-able list of tracks.
-class _TrackCollectionScaffold extends ConsumerWidget {
-  const _TrackCollectionScaffold({
+class TrackCollectionScaffold extends ConsumerWidget {
+  const TrackCollectionScaffold({
+    super.key,
     required this.title,
     required this.tracks,
     required this.emptyIcon,
@@ -71,6 +152,7 @@ class _TrackCollectionScaffold extends ConsumerWidget {
     this.headerBuilder,
     this.headerHeroTag,
     this.onTrackMenu,
+    this.appBarActions = const <Widget>[],
   });
 
   final String title;
@@ -81,6 +163,7 @@ class _TrackCollectionScaffold extends ConsumerWidget {
   final WidgetBuilder? headerBuilder;
   final String? headerHeroTag;
   final void Function(Track track)? onTrackMenu;
+  final List<Widget> appBarActions;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -92,6 +175,11 @@ class _TrackCollectionScaffold extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: palette.background,
+      bottomNavigationBar: tracks.isEmpty
+          ? null
+          // Same persistent mini-player as the shell, so browsing a detail
+          // screen never hides what's playing.
+          : SafeArea(top: false, child: MiniPlayerBar()),
       appBar: AppBar(
         leading: IconButton(
           onPressed: () => Navigator.of(context).maybePop(),
@@ -99,6 +187,7 @@ class _TrackCollectionScaffold extends ConsumerWidget {
           tooltip: 'Back',
         ),
         title: Text(title, style: text.screenTitle),
+        actions: appBarActions,
       ),
       body: tracks.isEmpty
           ? EmptyState(
@@ -197,14 +286,16 @@ class _CircleAction extends StatelessWidget {
         width: 46,
         height: 46,
         decoration: BoxDecoration(
-          color: filled ? palette.ink : palette.surface,
+          // Fixed charcoal/cream pair so the filled icon stays readable in
+          // dark mode (palette.ink and palette.logoBar both go light there).
+          color: filled ? MonoraColors.ink : palette.surface,
           shape: BoxShape.circle,
           border: filled ? null : Border.all(color: palette.outline),
         ),
         child: Icon(
           icon,
           size: 22,
-          color: filled ? palette.logoBar : palette.ink,
+          color: filled ? MonoraColors.logoBar : palette.ink,
         ),
       ),
     );
@@ -253,7 +344,7 @@ class AlbumDetailScreen extends ConsumerWidget {
       );
     }
 
-    return _TrackCollectionScaffold(
+    return TrackCollectionScaffold(
       title: album.name,
       subtitle:
           '${album.artist} · ${tracks.length} ${tracks.length == 1 ? 'song' : 'songs'}',
@@ -322,7 +413,7 @@ class ArtistDetailScreen extends ConsumerWidget {
       );
     }
 
-    return _TrackCollectionScaffold(
+    return TrackCollectionScaffold(
       title: artist.name,
       subtitle:
           '${tracks.length} ${tracks.length == 1 ? 'song' : 'songs'} · ${artist.albumCount} ${artist.albumCount == 1 ? 'album' : 'albums'}',
@@ -372,7 +463,7 @@ class PlaylistDetailScreen extends ConsumerWidget {
       );
     }
 
-    return _TrackCollectionScaffold(
+    return TrackCollectionScaffold(
       title: playlist.name,
       subtitle:
           '${tracks.length} ${tracks.length == 1 ? 'song' : 'songs'} · ${totalDurationLabel(tracks)}',

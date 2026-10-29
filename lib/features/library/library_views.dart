@@ -13,6 +13,8 @@ import '../../core/widgets/artwork.dart';
 import '../../core/widgets/common.dart';
 import '../../providers/app_providers.dart';
 import '../player/player_actions.dart';
+import '../shell/shell_screen.dart' show MiniPlayerBar;
+import 'folders_screen.dart';
 import 'library_detail_screens.dart';
 import 'playlists_screen.dart';
 
@@ -65,6 +67,12 @@ class SongsQuickLinksView extends ConsumerWidget {
         detail:
             '${playlists.length} ${playlists.length == 1 ? 'playlist' : 'playlists'}',
         onTap: () => pushDetail(context, const PlaylistsScreen()),
+      ),
+      _QuickLink(
+        icon: Icons.folder_rounded,
+        label: 'Folders',
+        detail: 'Browse by folder on this device',
+        onTap: () => pushDetail(context, const FoldersScreen()),
       ),
       _QuickLink(
         icon: Icons.favorite_rounded,
@@ -329,6 +337,7 @@ class CollectionScreenScaffold extends StatelessWidget {
     final palette = context.monora;
     return Scaffold(
       backgroundColor: palette.background,
+      bottomNavigationBar: const SafeArea(top: false, child: MiniPlayerBar()),
       appBar: AppBar(
         title: Text(title, style: MonoraText.of(palette).screenTitle),
         leading: const _BackChevron(),

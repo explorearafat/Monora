@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -42,6 +43,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   Future<void> _route() async {
     if (!mounted || _navigated) return;
     _navigated = true;
+    // Settle the OS permission check first: on a slow cold start the status
+    // refresh can lag behind this timer, and routing on "undetermined" sent
+    // already-granted users back to the permission screen on every launch.
+    await ref.read(permissionProvider.notifier).refresh();
+    if (!mounted) return;
     final permission = ref.read(permissionProvider);
     if (!permission.canReadLibrary) {
       _go(const PermissionScreen());
@@ -78,9 +84,19 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   @override
   Widget build(BuildContext context) {
     final palette = context.monora;
-    return Scaffold(
-      backgroundColor: palette.background,
-      body: AnimatedBuilder(
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+        systemNavigationBarColor: palette.background,
+        systemNavigationBarIconBrightness: dark
+            ? Brightness.light
+            : Brightness.dark,
+      ),
+      child: Scaffold(
+        backgroundColor: palette.background,
+        body: AnimatedBuilder(
         animation: _entrance,
         builder: (context, _) {
           final t = Curves.easeOutCubic.transform(_entrance.value);
@@ -137,6 +153,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             ],
           );
         },
+      ),
       ),
     );
   }

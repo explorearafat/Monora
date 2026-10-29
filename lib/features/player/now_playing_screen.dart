@@ -206,6 +206,13 @@ Future<void> _showPlayerMenu(BuildContext context, WidgetRef ref, Track track) {
         label: 'Add to playlist…',
         onSelected: () => showTrackOptions(context, ref, track),
       ),
+      OptionSheetItem(
+        icon: Icons.stop_circle_outlined,
+        label: 'Stop playback',
+        destructive: true,
+        onSelected: () =>
+            unawaited(ref.read(playerServiceProvider).stop()),
+      ),
     ],
   );
 }

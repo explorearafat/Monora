@@ -1,39 +1,49 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../data/models/library_models.dart';
 import '../data/repositories/preferences_repository.dart';
+import '../services/audio_device_service.dart';
+import '../services/audio_handler.dart';
 import '../services/player_service.dart';
 import 'app_providers.dart';
 
+/// The single app-lifetime [AudioPlayer], built in `main()` (its effect
+/// pipeline must exist at construction time) and overridden at bootstrap.
+final audioPlayerProvider = Provider<AudioPlayer>(
+  (ref) => throw UnimplementedError(
+    'audioPlayerProvider must be overridden at bootstrap',
+  ),
+);
+
+/// Optional Android equalizer, built in `main()` on Android only.
+final audioEqualizerProvider = Provider<AndroidEqualizer?>((ref) => null);
+
+/// Optional Android loudness enhancer, built in `main()` on Android only.
+final audioLoudnessEnhancerProvider = Provider<AndroidLoudnessEnhancer?>(
+  (ref) => null,
+);
+
+/// The MediaSession handler registered with audio_service, or null on
+/// platforms without media-notification support (e.g. Windows desktop).
+final audioHandlerProvider = Provider<MonoraAudioHandler?>((ref) => null);
+
 /// The single app-lifetime player service.
 ///
-/// The Android audio-effect pipeline (equalizer + loudness enhancer) must be
-/// attached when the [AudioPlayer] is constructed, so it is created here and
-/// handed to the service.
+/// All notification/lock-screen concerns live in [MonoraAudioHandler], which
+/// observes the same [AudioPlayer] — this service only owns queue management
+/// and app-facing state, so UI and MediaSession can never diverge.
 final playerServiceProvider = Provider<MonoraPlayerService>((ref) {
-  final isAndroid = !kIsWeb && Platform.isAndroid;
-  final equalizer = isAndroid ? AndroidEqualizer() : null;
-  final loudnessEnhancer = isAndroid ? AndroidLoudnessEnhancer() : null;
-
-  final player = AudioPlayer(
-    audioPipeline: AudioPipeline(
-      androidAudioEffects: [?equalizer, ?loudnessEnhancer],
-    ),
-  );
-
   final repository = ref.watch(preferencesRepositoryProvider);
-
+  // `late` so the persist callback can reference the service it belongs to.
   late final MonoraPlayerService service;
   service = MonoraPlayerService(
-    player: player,
+    player: ref.watch(audioPlayerProvider),
     artworkRepository: ref.watch(artworkRepositoryProvider),
-    equalizer: equalizer,
-    loudnessEnhancer: loudnessEnhancer,
+    equalizer: ref.watch(audioEqualizerProvider),
+    loudnessEnhancer: ref.watch(audioLoudnessEnhancerProvider),
     onPersistSession: (position, index) async {
       final ids = service.queue.map((track) => track.id).take(300).toList();
       await repository.saveLastSession(
@@ -48,6 +58,16 @@ final playerServiceProvider = Provider<MonoraPlayerService>((ref) {
     },
   );
 
+  // Apply persisted playback extras.
+  unawaited(service.setSkipSilence(repository.loadSkipSilence()));
+  service.configureCrossfade(
+    enabled: repository.loadCrossfade(),
+    seconds: repository.loadCrossfadeSeconds(),
+  );
+
+  // Resume when headphones/Bluetooth/car devices come back.
+  final deviceSub = AudioDeviceService.watch(service);
+
   // Flush listening time periodically.
   final statsTimer = Timer.periodic(const Duration(seconds: 30), (_) {
     final millis = service.drainListeningMillis();
@@ -57,6 +77,7 @@ final playerServiceProvider = Provider<MonoraPlayerService>((ref) {
   });
   ref.onDispose(() {
     statsTimer.cancel();
+    deviceSub?.cancel();
     service.dispose();
   });
   return service;

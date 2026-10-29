@@ -9,6 +9,10 @@ import '../data/repositories/lyrics_repository.dart';
 import '../data/repositories/media_repository.dart';
 import '../data/repositories/preferences_repository.dart';
 
+// Circular by design: settings notifiers need the player service to apply
+// skip-silence/crossfade changes, while player_providers consumes the
+// repositories declared here.
+import 'player_providers.dart';
 /// Injected at bootstrap in `main()` so every repository can be synchronous.
 final sharedPreferencesProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError(
@@ -68,11 +72,13 @@ class PermissionState {
 class PermissionNotifier extends Notifier<PermissionState> {
   @override
   PermissionState build() {
-    Future.microtask(_refresh);
+    Future.microtask(refresh);
     return const PermissionState(audio: LibraryPermissionStatus.undetermined);
   }
 
-  Future<void> _refresh() async {
+  /// Re-reads the OS permission state. Await this before making routing
+  /// decisions — the splash screen must never race the platform channel.
+  Future<void> refresh() async {
     try {
       final status = await Permission.audio.status;
       state = state.copyWith(audio: _map(status));
@@ -106,15 +112,12 @@ class PermissionNotifier extends Notifier<PermissionState> {
     }
     state = state.copyWith(audio: status);
 
-    // Best effort: the media notification is better with notification access.
+    // One-time ask for the media notification (Android 13+). Only prompted
+    // after audio access exists, and only while still undetermined so the
+    // dialog can never loop across launches.
     if (status == LibraryPermissionStatus.granted &&
         state.notifications == LibraryPermissionStatus.undetermined) {
-      try {
-        final notificationStatus = await Permission.notification.status;
-        state = state.copyWith(notifications: _map(notificationStatus));
-      } on Exception {
-        // Notifications are optional; leave as-is.
-      }
+      await requestNotifications();
     }
     return state.audio;
   }
@@ -172,17 +175,19 @@ class LibraryNotifier extends AsyncNotifier<LibraryData> {
   @override
   Future<LibraryData> build() async {
     final repository = ref.watch(mediaRepositoryProvider);
-    final results = await Future.wait([
-      repository.loadTracks(),
-      repository.loadAlbums(),
-      repository.loadArtists(),
-      repository.loadGenreStats(),
-    ]);
+    final excluded = ref.watch(excludedFoldersProvider);
+    final allTracks = await repository.loadTracks();
+    // Filtered at the track level, then albums/artists/genres are derived
+    // from the surviving tracks so excluded folders disappear everywhere.
+    final tracks = [
+      for (final track in allTracks)
+        if (!isExcluded(track.file, excluded)) track,
+    ];
     return LibraryData(
-      tracks: results[0] as List<Track>,
-      albums: results[1] as List<Album>,
-      artists: results[2] as List<Artist>,
-      genres: results[3] as List<GenreStat>,
+      tracks: tracks,
+      albums: albumsFromTracks(tracks),
+      artists: artistsFromTracks(tracks),
+      genres: genresFromTracks(tracks),
       scannedAt: DateTime.now(),
     );
   }
@@ -503,6 +508,146 @@ class PlaybackSpeedNotifier extends Notifier<double> {
 
 final playbackSpeedProvider = NotifierProvider<PlaybackSpeedNotifier, double>(
   PlaybackSpeedNotifier.new,
+);
+
+/// Index into the track sort options shown on track-list screens.
+class TrackSortNotifier extends Notifier<int> {
+  @override
+  int build() => ref.watch(preferencesRepositoryProvider).loadTrackSort();
+
+  Future<void> set(int index) async {
+    state = index;
+    await ref.read(preferencesRepositoryProvider).saveTrackSort(index);
+  }
+}
+
+final trackSortProvider = NotifierProvider<TrackSortNotifier, int>(
+  TrackSortNotifier.new,
+);
+
+class ExcludedFoldersNotifier extends Notifier<List<String>> {
+  @override
+  List<String> build() =>
+      ref.watch(preferencesRepositoryProvider).loadExcludedFolders();
+
+  Future<void> add(String folder) async {
+    if (state.any((existing) => existing == folder)) return;
+    final next = [...state, folder]..sort();
+    state = next;
+    await ref.read(preferencesRepositoryProvider).saveExcludedFolders(next);
+    // libraryProvider watches this notifier, so the scan refreshes itself.
+  }
+
+  Future<void> remove(String folder) async {
+    final next = state.where((existing) => existing != folder).toList();
+    state = next;
+    await ref.read(preferencesRepositoryProvider).saveExcludedFolders(next);
+  }
+}
+
+final excludedFoldersProvider =
+    NotifierProvider<ExcludedFoldersNotifier, List<String>>(
+      ExcludedFoldersNotifier.new,
+    );
+
+class SkipSilenceNotifier extends Notifier<bool> {
+  @override
+  bool build() => ref.watch(preferencesRepositoryProvider).loadSkipSilence();
+
+  Future<void> set(bool value) async {
+    state = value;
+    await ref.read(preferencesRepositoryProvider).saveSkipSilence(value);
+    await ref.read(playerServiceProvider).setSkipSilence(value);
+  }
+}
+
+final skipSilenceProvider = NotifierProvider<SkipSilenceNotifier, bool>(
+  SkipSilenceNotifier.new,
+);
+
+class CrossfadeNotifier extends Notifier<bool> {
+  @override
+  bool build() => ref.watch(preferencesRepositoryProvider).loadCrossfade();
+
+  Future<void> set(bool value) async {
+    state = value;
+    await ref.read(preferencesRepositoryProvider).saveCrossfade(value);
+    _apply();
+  }
+
+  void _apply() {
+    final repository = ref.read(preferencesRepositoryProvider);
+    ref.read(playerServiceProvider).configureCrossfade(
+          enabled: repository.loadCrossfade(),
+          seconds: repository.loadCrossfadeSeconds(),
+        );
+  }
+}
+
+final crossfadeProvider = NotifierProvider<CrossfadeNotifier, bool>(
+  CrossfadeNotifier.new,
+);
+
+class CrossfadeSecondsNotifier extends Notifier<int> {
+  @override
+  int build() =>
+      ref.watch(preferencesRepositoryProvider).loadCrossfadeSeconds();
+
+  Future<void> set(int seconds) async {
+    state = seconds;
+    await ref
+        .read(preferencesRepositoryProvider)
+        .saveCrossfadeSeconds(seconds);
+    final repository = ref.read(preferencesRepositoryProvider);
+    ref.read(playerServiceProvider).configureCrossfade(
+          enabled: repository.loadCrossfade(),
+          seconds: repository.loadCrossfadeSeconds(),
+        );
+  }
+}
+
+final crossfadeSecondsProvider =
+    NotifierProvider<CrossfadeSecondsNotifier, int>(
+      CrossfadeSecondsNotifier.new,
+    );
+
+class LastFmEnabledNotifier extends Notifier<bool> {
+  @override
+  bool build() =>
+      ref.watch(preferencesRepositoryProvider).loadLastFmEnabled() &&
+      ref
+          .watch(preferencesRepositoryProvider)
+          .loadLastFmSessionKey()
+          .isNotEmpty;
+
+  Future<void> set(bool value) async {
+    state = value;
+    await ref.read(preferencesRepositoryProvider).saveLastFmEnabled(value);
+  }
+}
+
+final lastFmEnabledProvider = NotifierProvider<LastFmEnabledNotifier, bool>(
+  LastFmEnabledNotifier.new,
+);
+
+class LastFmSessionNotifier extends Notifier<String> {
+  @override
+  String build() =>
+      ref.watch(preferencesRepositoryProvider).loadLastFmSessionKey();
+
+  Future<void> set(String sessionKey) async {
+    state = sessionKey;
+    await ref
+        .read(preferencesRepositoryProvider)
+        .saveLastFmSessionKey(sessionKey);
+    if (sessionKey.isEmpty) {
+      await ref.read(lastFmEnabledProvider.notifier).set(false);
+    }
+  }
+}
+
+final lastFmSessionProvider = NotifierProvider<LastFmSessionNotifier, String>(
+  LastFmSessionNotifier.new,
 );
 
 class ProfileNameNotifier extends Notifier<String> {

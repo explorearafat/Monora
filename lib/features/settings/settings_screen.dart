@@ -8,6 +8,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/widgets/common.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/player_providers.dart';
+import '../../services/lastfm_service.dart';
 import 'settings_sheets.dart';
 
 /// Settings: Appearance, Playback, Audio — every control is wired to a real
@@ -25,6 +26,12 @@ class SettingsScreen extends ConsumerWidget {
     final pauseOnInterruptions = ref.watch(pauseOnInterruptionsProvider);
     final resumeSession = ref.watch(resumeSessionProvider);
     final speed = ref.watch(playbackSpeedProvider);
+    final crossfade = ref.watch(crossfadeProvider);
+    final crossfadeSeconds = ref.watch(crossfadeSecondsProvider);
+    final skipSilence = ref.watch(skipSilenceProvider);
+    final excludedFolders = ref.watch(excludedFoldersProvider);
+    final lastFmEnabled = ref.watch(lastFmEnabledProvider);
+    final lastFmSession = ref.watch(lastFmSessionProvider);
     final player = ref.watch(playerServiceProvider);
     final Widget sleepValue = ValueListenableBuilder<Duration>(
       valueListenable: player.sleepRemaining,
@@ -110,6 +117,29 @@ class SettingsScreen extends ConsumerWidget {
             valueWidget: sleepValue,
             onTap: () => showSleepTimerSheet(context, ref),
           ),
+          _SettingsToggleRow(
+            icon: Icons.auto_fix_high_rounded,
+            label: 'Crossfade',
+            value: crossfade,
+            onChanged: (value) => unawaited(
+              ref.read(crossfadeProvider.notifier).set(value),
+            ),
+          ),
+          if (crossfade)
+            _SettingsRow(
+              icon: Icons.av_timer_rounded,
+              label: 'Crossfade Length',
+              value: '$crossfadeSeconds seconds',
+              onTap: () => showCrossfadeSheet(context, ref),
+            ),
+          _SettingsToggleRow(
+            icon: Icons.graphic_eq_rounded,
+            label: 'Skip Silence',
+            value: skipSilence,
+            onChanged: (value) => unawaited(
+              ref.read(skipSilenceProvider.notifier).set(value),
+            ),
+          ),
           const SizedBox(height: 18),
           _SectionLabel('Audio'),
           _SettingsRow(
@@ -124,6 +154,38 @@ class SettingsScreen extends ConsumerWidget {
             value: 'Device Default',
             onTap: openSystemSoundSettings,
           ),
+          const SizedBox(height: 18),
+          _SectionLabel('Library & Data'),
+          _SettingsRow(
+            icon: Icons.folder_off_rounded,
+            label: 'Excluded Folders',
+            value: excludedFolders.isEmpty
+                ? 'None'
+                : '${excludedFolders.length} '
+                    '${excludedFolders.length == 1 ? 'folder' : 'folders'}',
+            onTap: () => showExcludedFoldersSheet(context, ref),
+          ),
+          _SettingsRow(
+            icon: Icons.backup_outlined,
+            label: 'Backup & Restore',
+            value: 'Playlists',
+            onTap: () => showBackupSheet(context, ref),
+          ),
+          const SizedBox(height: 18),
+          if (LastFmConfig.configured) ...[
+            _SectionLabel('Connect'),
+            _SettingsRow(
+              icon: Icons.audiotrack_rounded,
+              label: 'Last.fm Scrobbling',
+              value: lastFmEnabled
+                  ? 'On'
+                  : lastFmSession.isNotEmpty
+                  ? 'Signed in'
+                  : 'Off',
+              onTap: () => showLastFmSheet(context, ref),
+            ),
+            const SizedBox(height: 18),
+          ],
           const SizedBox(height: 26),
           Center(
             child: Text(

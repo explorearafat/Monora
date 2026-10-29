@@ -13,6 +13,7 @@ import '../../core/widgets/artwork.dart';
 import '../../core/widgets/common.dart';
 import '../../core/widgets/track_tile.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/player_providers.dart';
 import '../library/library_detail_screens.dart';
 import '../player/player_actions.dart';
 
@@ -196,6 +197,13 @@ class _TrendingView extends ConsumerWidget {
           for (final track in trending.songs)
             TrackTile(
               track: track,
+              isCurrent:
+                  ref.watch(
+                    playerServiceProvider.select(
+                      (player) => player.currentTrack?.id,
+                    ),
+                  ) ==
+                  track.id,
               onTap: () =>
                   unawaited(playTracksStartingFrom(ref, trending.songs, track)),
               trailing: TileIconButton(
@@ -354,6 +362,13 @@ class _ResultsView extends ConsumerWidget {
             TrackTile(
               track: track,
               showDuration: true,
+              isCurrent:
+                  ref.watch(
+                    playerServiceProvider.select(
+                      (player) => player.currentTrack?.id,
+                    ),
+                  ) ==
+                  track.id,
               onTap: () =>
                   unawaited(playTracksStartingFrom(ref, result.songs, track)),
               trailing: Row(

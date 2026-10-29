@@ -77,7 +77,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: selected ? palette.ink : Colors.transparent,
+                      // Fixed charcoal/cream pair: both flip with the theme,
+                      // which would leave the selected label unreadable.
+                      color: selected ? MonoraColors.ink : Colors.transparent,
                       borderRadius: BorderRadius.circular(20),
                       border: selected
                           ? null
@@ -90,7 +92,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                         fontWeight: FontWeight.w600,
                         fontSize: 13,
                         color: selected
-                            ? palette.logoBar
+                            ? MonoraColors.logoBar
                             : palette.inkSecondary,
                       ),
                     ),

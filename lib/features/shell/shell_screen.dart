@@ -6,11 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
+import '../../core/utils/formatters.dart';
 import '../../data/models/library_models.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/common.dart';
+import '../../core/widgets/playing_bars.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/player_providers.dart';
+import '../../services/lastfm_service.dart';
 import '../../services/player_service.dart';
 import '../home/home_screen.dart';
 import '../library/library_screen.dart';
@@ -57,7 +60,25 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       _lastRecordedTrackId = id;
       unawaited(ref.read(recentsProvider.notifier).record(id));
       unawaited(ref.read(playCountsProvider.notifier).increment(id));
+      if (track != null) _scrobble(track);
     }
+  }
+
+  /// Opt-in Last.fm scrobble when a new track starts. Silent failure by
+  /// design — network hiccups must never interrupt listening.
+  void _scrobble(Track track) {
+    if (!ref.read(lastFmEnabledProvider)) return;
+    final session = ref.read(lastFmSessionProvider);
+    if (session.isEmpty) return;
+    unawaited(
+      LastFmService.scrobble(
+        sessionKey: session,
+        artist: track.artist,
+        track: track.title,
+        album: track.album,
+        startedAtSeconds: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      ),
+    );
   }
 
   void _showFailure(String message) {
@@ -200,7 +221,9 @@ class _NavItem extends StatelessWidget {
 }
 
 /// Slim bar above the navigation showing the current track; expands into the
-/// full Now Playing screen when tapped.
+/// full Now Playing screen when tapped. Always driven by the shared player
+/// service, so it stays correct across tabs, background playback, and
+/// notification/lock-screen control changes.
 class MiniPlayerBar extends ConsumerWidget {
   const MiniPlayerBar({super.key});
 
@@ -267,12 +290,23 @@ class MiniPlayerBar extends ConsumerWidget {
                               ],
                             ),
                           ),
+                          const PlayingBars(),
+                          _MiniControlButton(
+                            icon: Icons.skip_previous_rounded,
+                            semanticLabel: 'Previous track',
+                            onTap: () => unawaited(player.previous()),
+                          ),
                           _MiniControlButton(
                             icon: player.isPlaying
                                 ? Icons.pause_rounded
                                 : Icons.play_arrow_rounded,
                             semanticLabel: player.isPlaying ? 'Pause' : 'Play',
-                            onTap: () => unawaited(player.playPause()),
+                            // Buffering spinner replaces the icon so the
+                            // button never lies about the audio engine.
+                            showSpinner: player.isBuffering,
+                            onTap: player.isBuffering
+                                ? null
+                                : () => unawaited(player.playPause()),
                           ),
                           _MiniControlButton(
                             icon: Icons.skip_next_rounded,
@@ -339,11 +373,13 @@ class _MiniControlButton extends StatelessWidget {
     required this.icon,
     required this.onTap,
     required this.semanticLabel,
+    this.showSpinner = false,
   });
 
   final IconData icon;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final String semanticLabel;
+  final bool showSpinner;
 
   @override
   Widget build(BuildContext context) {
@@ -356,12 +392,22 @@ class _MiniControlButton extends StatelessWidget {
       child: SizedBox(
         width: 44,
         height: 44,
-        child: Icon(icon, size: 26, color: palette.ink),
+        child: showSpinner
+            ? Padding(
+                padding: const EdgeInsets.all(13),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  valueColor: AlwaysStoppedAnimation(palette.ink),
+                ),
+              )
+            : Icon(icon, size: 26, color: palette.ink),
       ),
     );
   }
 }
 
+/// Hairline seek bar under the mini-player: real-time progress, tap or drag
+/// to seek, elapsed/total durations flanking it.
 class _MiniProgressHairline extends ConsumerWidget {
   const _MiniProgressHairline();
 
@@ -371,22 +417,78 @@ class _MiniProgressHairline extends ConsumerWidget {
     final palette = context.monora;
     final positionAsync = ref.watch(playerPositionProvider);
     final position = positionAsync.value ?? player.position;
-    final duration = player.duration;
-    final progress = duration == null || duration == Duration.zero
+    final duration = player.duration ?? Duration.zero;
+    final progress = duration == Duration.zero
         ? 0.0
         : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(end: progress),
-      duration: MonoraMotion.fast,
-      builder: (context, value, _) {
-        return LinearProgressIndicator(
-          value: value,
-          minHeight: 2,
-          backgroundColor: palette.outline,
-          valueColor: AlwaysStoppedAnimation(palette.accent),
-        );
+    void seekTo(Offset localPosition, double width) {
+      if (duration == Duration.zero) return;
+      final fraction = (localPosition.dx / width).clamp(0.0, 1.0);
+      unawaited(
+        player.seek(
+          Duration(milliseconds: (fraction * duration.inMilliseconds).round()),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (details) {
+        final box = context.findRenderObject()! as RenderBox;
+        seekTo(details.localPosition, box.size.width);
       },
+      onHorizontalDragUpdate: (details) {
+        final box = context.findRenderObject()! as RenderBox;
+        seekTo(details.localPosition, box.size.width);
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+        child: Row(
+          children: [
+            Text(
+              formatDuration(position),
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w500,
+                fontSize: 10,
+                letterSpacing: 0.2,
+                color: palette.inkTertiary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(end: progress),
+                  duration: MonoraMotion.fast,
+                  builder: (context, value, _) {
+                    return LinearProgressIndicator(
+                      value: value,
+                      minHeight: 2,
+                      borderRadius: BorderRadius.circular(1),
+                      backgroundColor: palette.outline,
+                      valueColor: AlwaysStoppedAnimation(palette.accent),
+                    );
+                  },
+                ),
+              ),
+            ),
+            Text(
+              formatDuration(duration),
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w500,
+                fontSize: 10,
+                letterSpacing: 0.2,
+                color: palette.inkTertiary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

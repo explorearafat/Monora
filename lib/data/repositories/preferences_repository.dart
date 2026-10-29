@@ -23,6 +23,13 @@ class PreferencesRepository {
   static const _keyResumeSession = 'monora.resume_session';
   static const _keyPlaybackSpeed = 'monora.playback_speed';
   static const _keyLastSession = 'monora.last_session';
+  static const _keyTrackSort = 'monora.track_sort';
+  static const _keyExcludedFolders = 'monora.excluded_folders';
+  static const _keySkipSilence = 'monora.skip_silence';
+  static const _keyCrossfade = 'monora.crossfade';
+  static const _keyCrossfadeSeconds = 'monora.crossfade_seconds';
+  static const _keyLastFmEnabled = 'monora.lastfm_enabled';
+  static const _keyLastFmSession = 'monora.lastfm_session';
 
   // --- Favorites -----------------------------------------------------------
 
@@ -116,6 +123,49 @@ class PreferencesRepository {
 
   Future<void> savePlaybackSpeed(double speed) =>
       _prefs.setDouble(_keyPlaybackSpeed, speed);
+
+  // --- Playback extras -------------------------------------------------------
+
+  /// Index into the [TrackSort] options list; see library screens.
+  int loadTrackSort() => _prefs.getInt(_keyTrackSort) ?? 0;
+
+  Future<void> saveTrackSort(int index) => _prefs.setInt(_keyTrackSort, index);
+
+  /// Absolute directory paths whose audio files never enter the library
+  /// (ringtones, WhatsApp audio, voice recordings...).
+  List<String> loadExcludedFolders() =>
+      _prefs.getStringList(_keyExcludedFolders) ?? const [];
+
+  Future<void> saveExcludedFolders(List<String> folders) =>
+      _prefs.setStringList(_keyExcludedFolders, folders);
+
+  bool loadSkipSilence() => _prefs.getBool(_keySkipSilence) ?? false;
+
+  Future<void> saveSkipSilence(bool value) =>
+      _prefs.setBool(_keySkipSilence, value);
+
+  bool loadCrossfade() => _prefs.getBool(_keyCrossfade) ?? false;
+
+  Future<void> saveCrossfade(bool value) => _prefs.setBool(_keyCrossfade, value);
+
+  int loadCrossfadeSeconds() => _prefs.getInt(_keyCrossfadeSeconds) ?? 4;
+
+  Future<void> saveCrossfadeSeconds(int seconds) =>
+      _prefs.setInt(_keyCrossfadeSeconds, seconds);
+
+  // --- Last.fm ---------------------------------------------------------------
+
+  bool loadLastFmEnabled() => _prefs.getBool(_keyLastFmEnabled) ?? false;
+
+  Future<void> saveLastFmEnabled(bool value) =>
+      _prefs.setBool(_keyLastFmEnabled, value);
+
+  /// The scrobble session key from `auth.getMobileSession`; empty until the
+  /// user signs in from Settings.
+  String loadLastFmSessionKey() => _prefs.getString(_keyLastFmSession) ?? '';
+
+  Future<void> saveLastFmSessionKey(String key) =>
+      _prefs.setString(_keyLastFmSession, key);
 
   // --- Last session (queue snapshot) ---------------------------------------
 

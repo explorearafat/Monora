@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Declares Monora as a media app so it appears in Android Auto. -->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

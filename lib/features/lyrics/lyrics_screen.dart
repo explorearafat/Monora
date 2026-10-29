@@ -151,28 +151,36 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
                       itemBuilder: (context, index) {
                         final line = content.lines[index];
                         final isActive = index == activeIndex;
-                        return AnimatedOpacity(
-                          duration: const Duration(milliseconds: 260),
-                          opacity: isActive
-                              ? 1.0
-                              : (activeIndex == -2 ? 0.88 : 0.5),
-                          child: AnimatedDefaultTextStyle(
+                        return GestureDetector(
+                          // Karaoke-style tap-to-seek: any line jumps playback
+                          // to its timestamp.
+                          onTap: () => unawaited(
+                            ref.read(playerServiceProvider).seek(line.time),
+                          ),
+                          behavior: HitTestBehavior.opaque,
+                          child: AnimatedOpacity(
                             duration: const Duration(milliseconds: 260),
-                            style:
-                                (isActive
-                                        ? MonoraText.lyricsActive(
-                                            const Color(0xFFFFFFFF),
-                                          )
-                                        : MonoraText.lyricsIdle(
-                                            const Color(0xFFF6EFE2),
-                                          ))
-                                    .copyWith(
-                                      fontSize: _fullLyricsMode ? 21 : 28,
-                                    ),
-                            child: Text(
-                              line.text.isEmpty ? '···' : line.text,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                            opacity: isActive
+                                ? 1.0
+                                : (activeIndex == -2 ? 0.88 : 0.5),
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 260),
+                              style:
+                                  (isActive
+                                          ? MonoraText.lyricsActive(
+                                              const Color(0xFFFFFFFF),
+                                            )
+                                          : MonoraText.lyricsIdle(
+                                              const Color(0xFFF6EFE2),
+                                            ))
+                                      .copyWith(
+                                        fontSize: _fullLyricsMode ? 21 : 28,
+                                      ),
+                              child: Text(
+                                line.text.isEmpty ? '···' : line.text,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ),
                         );

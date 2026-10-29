@@ -192,6 +192,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
               const SliverToBoxAdapter(child: SizedBox(height: 26)),
+              const SliverToBoxAdapter(
+                child: SectionHeader(
+                  title: 'Made for Monora',
+                  padding: EdgeInsets.fromLTRB(20, 4, 20, 12),
+                ),
+              ),
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _SmartCard(
+                          icon: Icons.local_fire_department_rounded,
+                          title: 'Most Played',
+                          subtitle: 'Your all-time hits',
+                          mode: TrackListMode.mostPlayed,
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: _SmartCard(
+                          icon: Icons.all_inclusive_rounded,
+                          title: 'On Repeat',
+                          subtitle: 'Played 3+ times',
+                          mode: TrackListMode.onRepeat,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 26)),
               SliverToBoxAdapter(
                 child: SectionHeader(
                   title: 'Your Playlists',
@@ -277,7 +310,9 @@ class _FeaturedCard extends ConsumerWidget {
         child: Container(
           height: 168,
           decoration: BoxDecoration(
-            color: palette.ink,
+            // Fixed charcoal overlay: palette.ink turns light in dark mode and
+            // the cream headline over it would vanish.
+            color: MonoraColors.ink,
             borderRadius: BorderRadius.circular(22),
           ),
           child: Stack(
@@ -290,9 +325,9 @@ class _FeaturedCard extends ConsumerWidget {
                       begin: Alignment.centerLeft,
                       end: Alignment.centerRight,
                       colors: [
-                        palette.ink.withValues(alpha: 0.92),
-                        palette.ink.withValues(alpha: 0.55),
-                        palette.ink.withValues(alpha: 0.15),
+                        MonoraColors.ink.withValues(alpha: 0.92),
+                        MonoraColors.ink.withValues(alpha: 0.55),
+                        MonoraColors.ink.withValues(alpha: 0.15),
                       ],
                     ).createShader(bounds),
                     blendMode: BlendMode.srcOver,
@@ -516,9 +551,101 @@ class _PlaylistRow extends StatelessWidget {
   }
 }
 
+/// Smart-playlist card ("Most Played"/"On Repeat") derived from real
+/// listening data; opens the matching track list.
+class _SmartCard extends ConsumerWidget {
+  const _SmartCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.mode,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final TrackListMode mode;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final palette = context.monora;
+    final tracks = _smartTracks(ref, mode);
+    return Pressable(
+      onTap: tracks.isEmpty
+          ? null
+          : () => pushDetail(
+              context,
+              TrackListScreen(
+                title: title,
+                mode: mode,
+              ),
+            ),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: palette.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: palette.outline),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 22, color: palette.accent),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: 'Playfair',
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                color: palette.ink,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              tracks.isEmpty ? 'Nothing yet' : '${tracks.length} songs · $subtitle',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w400,
+                fontSize: 11.5,
+                color: palette.inkSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static List<Track> _smartTracks(WidgetRef ref, TrackListMode mode) {
+    final library = ref.watch(libraryProvider).value;
+    final playCounts = ref.watch(playCountsProvider);
+    final all = library?.tracks ?? const <Track>[];
+    return switch (mode) {
+      TrackListMode.mostPlayed => [
+        for (final track in all)
+          if ((playCounts[track.id] ?? 0) > 0) track,
+      ]..sort(
+        (a, b) => (playCounts[b.id] ?? 0).compareTo(playCounts[a.id] ?? 0),
+      ),
+      TrackListMode.onRepeat => [
+        for (final track in all)
+          if ((playCounts[track.id] ?? 0) >= 3) track,
+      ]..sort(
+        (a, b) => (playCounts[b.id] ?? 0).compareTo(playCounts[a.id] ?? 0),
+      ),
+      _ => const <Track>[],
+    };
+  }
+}
+
 class _SideHint extends StatelessWidget {
   const _SideHint({required this.icon, required this.text});
-
   final IconData icon;
   final String text;
 

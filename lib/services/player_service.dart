@@ -5,10 +5,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:audio_service/audio_service.dart' show MediaItem;
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:just_audio_background/just_audio_background.dart';
 
 import '../data/models/library_models.dart';
 import '../data/repositories/artwork_repository.dart';
@@ -22,8 +22,9 @@ class PlaybackFailure {
 }
 
 /// Owns the single [AudioPlayer] and everything playback-related: queue
-/// management, shuffle/repeat, speed, sleep timer, audio focus, and the
-/// Android media notification (via `just_audio_background`).
+/// management, shuffle/repeat, speed, sleep timer, and audio focus. The
+/// Android media notification lives in [MonoraAudioHandler], which observes
+/// the same player, so both sides always agree on the real playback state.
 ///
 /// Widgets observe this through [ChangeNotifier] plus [positionStream]; all
 /// mutation flows funnel through the command methods below so the UI can never
@@ -59,6 +60,12 @@ class MonoraPlayerService extends ChangeNotifier {
   int _unaccountedListeningMs = 0;
 
   bool _pauseOnInterruptions = true;
+  bool _skipSilence = false;
+  bool _crossfadeEnabled = false;
+  Duration _crossfadeDuration = const Duration(seconds: 4);
+  bool _crossfading = false;
+  Timer? _crossfadeTimer;
+  bool _resumeOnReconnect = false;
 
   final StreamController<PlaybackFailure> _failureController =
       StreamController<PlaybackFailure>.broadcast();
@@ -151,6 +158,7 @@ class MonoraPlayerService extends ChangeNotifier {
       );
       _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
         if (_player.playing) {
+          _resumeOnReconnect = true;
           unawaited(_player.pause());
         }
       });
@@ -174,6 +182,34 @@ class MonoraPlayerService extends ChangeNotifier {
   /// Reconfigures interruption handling after the user flips the setting.
   void setPauseOnInterruptions(bool value) {
     _pauseOnInterruptions = value;
+  }
+
+  /// Skips silent stretches inside files (just_audio platform support).
+  Future<void> setSkipSilence(bool value) async {
+    _skipSilence = value;
+    try {
+      await _player.setSkipSilenceEnabled(value);
+    } on Exception {
+      // Not supported on this platform/file — setting stays for next load.
+    }
+    notifyListeners();
+  }
+
+  bool get skipSilenceEnabled => _skipSilence;
+
+  /// Configures the end-of-track fade that eases transitions between songs.
+  void configureCrossfade({required bool enabled, required int seconds}) {
+    _crossfadeEnabled = enabled;
+    _crossfadeDuration = Duration(seconds: seconds.clamp(1, 12));
+    if (!enabled) _cancelCrossfade();
+  }
+
+  /// A headphone/Bluetooth/car device came back: resume if the music only
+  /// stopped because the previous one vanished (audio becoming noisy).
+  Future<void> handleAudioDeviceConnected() async {
+    if (!_resumeOnReconnect || _player.playing) return;
+    _resumeOnReconnect = false;
+    await playPause();
   }
 
   void _onInterruption(AudioInterruptionEvent event) {
@@ -203,6 +239,7 @@ class MonoraPlayerService extends ChangeNotifier {
     if (state.processingState == ProcessingState.completed &&
         _player.loopMode != LoopMode.one) {
       // End of the queue: restart paused at the top for a clean state.
+      _cancelCrossfade();
       unawaited(_player.pause());
       unawaited(_player.seek(Duration.zero, index: 0));
     }
@@ -215,6 +252,57 @@ class MonoraPlayerService extends ChangeNotifier {
       _unaccountedListeningMs += deltaMs;
     }
     _lastPosition = position;
+    _maybeCrossfade(position);
+  }
+
+  /// Fades the current track out over the last [_crossfadeDuration] and
+  /// advances early, so consecutive songs transition without a hard cut.
+  /// (Single-player approximation: the fade completes just as the file ends.)
+  void _maybeCrossfade(Duration position) {
+    if (!_crossfadeEnabled || _crossfading) return;
+    if (!_player.playing || _player.processingState != ProcessingState.ready) {
+      return;
+    }
+    if (_player.loopMode != LoopMode.off || !_player.hasNext) return;
+    final duration = _player.duration;
+    if (duration == null || duration <= _crossfadeDuration * 2) return;
+    final remaining = duration - position;
+    if (remaining <= Duration.zero || remaining > _crossfadeDuration) return;
+
+    _crossfading = true;
+    final startRemainingMs = remaining.inMilliseconds;
+    _crossfadeTimer = Timer.periodic(const Duration(milliseconds: 100), (
+      timer,
+    ) {
+      final left = duration - _player.position;
+      final jumped = left.inMilliseconds > startRemainingMs + 500;
+      if (jumped) {
+        // The user skipped or the track changed underneath the fade.
+        _cancelCrossfade();
+        return;
+      }
+      final fraction = (left.inMilliseconds / startRemainingMs).clamp(0.0, 1.0);
+      unawaited(_player.setVolume(0.02 + 0.98 * fraction));
+      if (left <= const Duration(milliseconds: 250)) {
+        _crossfading = false;
+        timer.cancel();
+        _crossfadeTimer = null;
+        unawaited(() async {
+          await _player.setVolume(1.0);
+          await _player.seekToNext();
+          if (!_player.playing) await _player.play();
+        }());
+      }
+    });
+  }
+
+  void _cancelCrossfade() {
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = null;
+    _crossfading = false;
+    if (_player.volume != 1.0) {
+      unawaited(_player.setVolume(1.0));
+    }
   }
 
   void _onPlayerError(Object error) {
@@ -260,6 +348,7 @@ class MonoraPlayerService extends ChangeNotifier {
     _queue = List.of(tracks);
     _consecutiveErrors = 0;
     _lastPosition = initialPosition;
+    _cancelCrossfade();
     _loadingQueue = true;
 
     try {
@@ -371,12 +460,16 @@ class MonoraPlayerService extends ChangeNotifier {
   // --- Transport -----------------------------------------------------------
 
   Future<void> playPause() async {
+    _cancelCrossfade();
+    _resumeOnReconnect = false;
     try {
       if (_player.playing) {
         await _player.pause();
       } else if (_player.processingState == ProcessingState.idle &&
           _queue.isNotEmpty) {
-        await loadQueue(_queue, autoplay: true);
+        // After an explicit stop(): just_audio re-activates the released
+        // platform player and resumes at the preserved position.
+        await _player.play();
         return;
       } else {
         await _player.play();
@@ -389,6 +482,7 @@ class MonoraPlayerService extends ChangeNotifier {
 
   Future<void> next() async {
     _consecutiveErrors = 0;
+    _cancelCrossfade();
     try {
       if (_player.loopMode == LoopMode.one) {
         await _player.setLoopMode(LoopMode.off);
@@ -403,6 +497,7 @@ class MonoraPlayerService extends ChangeNotifier {
 
   Future<void> previous() async {
     _consecutiveErrors = 0;
+    _cancelCrossfade();
     try {
       // Standard UX: a deep track restarts first, a second tap goes back.
       if (_player.position > const Duration(seconds: 3)) {
@@ -418,8 +513,25 @@ class MonoraPlayerService extends ChangeNotifier {
   }
 
   Future<void> seek(Duration position) async {
+    _cancelCrossfade();
     _lastPosition = position;
     await _player.seek(position);
+    notifyListeners();
+  }
+
+  /// Full stop requested by the user: halts decoding and releases the
+  /// platform playback pipeline. The queue is kept so the mini-player can
+  /// resume later via [playPause]; the media notification drops to its
+  /// paused/idle state rather than continuing to advertise playback.
+  Future<void> stop() async {
+    _consecutiveErrors = 0;
+    _cancelCrossfade();
+    _resumeOnReconnect = false;
+    try {
+      await _player.stop();
+    } on Exception {
+      // A failed stop still leaves the player in a recoverable state.
+    }
     notifyListeners();
   }
 
@@ -504,6 +616,7 @@ class MonoraPlayerService extends ChangeNotifier {
   @override
   void dispose() {
     _sleepTimer?.cancel();
+    _crossfadeTimer?.cancel();
     _stateSub?.cancel();
     _positionSub?.cancel();
     _interruptionSub?.cancel();

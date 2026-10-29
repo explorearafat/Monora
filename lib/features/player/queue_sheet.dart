@@ -7,6 +7,7 @@ import '../../data/models/library_models.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/widgets/artwork.dart';
+import '../../core/widgets/playing_bars.dart';
 import '../../providers/player_providers.dart';
 import '../../services/player_service.dart';
 
@@ -306,7 +307,7 @@ class _QueueRow extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  if (isCurrent) const _PlayingBars(),
+                  if (isCurrent) const PlayingBars(),
                   if (reorderable)
                     ReorderableDragStartListener(
                       index: index,
@@ -328,82 +329,4 @@ class _QueueRow extends ConsumerWidget {
     );
     return row;
   }
-}
-
-/// Tiny equalizer bars shown next to the current row while playing.
-class _PlayingBars extends ConsumerStatefulWidget {
-  const _PlayingBars();
-
-  @override
-  ConsumerState<_PlayingBars> createState() => _PlayingBarsState();
-}
-
-class _PlayingBarsState extends ConsumerState<_PlayingBars>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    );
-    _syncWithPlayback();
-  }
-
-  void _syncWithPlayback() {
-    final playing = ref.read(playerServiceProvider).isPlaying;
-    if (playing && !_controller.isAnimating) {
-      _controller.repeat();
-    } else if (!playing && _controller.isAnimating) {
-      _controller.stop();
-    }
-  }
-
-  @override
-  void didUpdateWidget(_PlayingBars oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncWithPlayback();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.monora;
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        return SizedBox(
-          width: 18,
-          height: 16,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (var i = 0; i < 3; i++)
-                Container(
-                  width: 3,
-                  height: 5 + 8 * (0.5 + 0.5 * _barOffset(i)),
-                  decoration: BoxDecoration(
-                    color: palette.accent,
-                    borderRadius: BorderRadius.circular(1.5),
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  double _barOffset(int i) =>
-      (0.5 +
-      0.5 *
-          (Curves.easeInOut.transform((_controller.value * 2 + i * 0.33) % 1)));
 }

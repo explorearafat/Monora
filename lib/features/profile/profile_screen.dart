@@ -10,6 +10,7 @@ import '../../core/utils/formatters.dart';
 import '../../core/widgets/common.dart';
 import '../../providers/app_providers.dart';
 import '../settings/settings_screen.dart';
+import 'wrapped_screen.dart';
 
 /// Profile & stats: identity, library counters, listening time, and top
 /// genres — all derived from real library data and persisted usage.
@@ -176,6 +177,70 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 26),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Pressable(
+                onTap: () => pushDetail(context, const WrappedScreen()),
+                borderRadius: BorderRadius.circular(20),
+                semanticLabel: 'Open Monora Wrapped',
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        MonoraColors.accent,
+                        MonoraColors.accentDeep,
+                      ],
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 24,
+                        color: MonoraColors.logoBar,
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Monora Wrapped',
+                              style: TextStyle(
+                                fontFamily: 'Playfair',
+                                fontWeight: FontWeight.w600,
+                                fontSize: 17,
+                                color: MonoraColors.logoBar,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Your listening story as a shareable card',
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontWeight: FontWeight.w400,
+                                fontSize: 12,
+                                color: MonoraColors.logoBar,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        size: 22,
+                        color: MonoraColors.logoBar,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 26),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/library_models.dart';
 
@@ -7,10 +8,13 @@ import '../../app/theme/app_typography.dart';
 import '../utils/formatters.dart';
 import 'artwork.dart';
 import 'common.dart';
+import 'playing_bars.dart';
 
 /// A song row used everywhere lists of tracks appear: artwork, title +
-/// artist, optional trailing slot.
-class TrackTile extends StatelessWidget {
+/// artist, optional trailing slot. The row for the track that is actually
+/// loaded in the player is highlighted and carries a live equalizer that
+/// animates only while playback is active.
+class TrackTile extends ConsumerWidget {
   const TrackTile({
     super.key,
     required this.track,
@@ -29,57 +33,85 @@ class TrackTile extends StatelessWidget {
   final bool showDuration;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final palette = context.monora;
     final text = MonoraText.of(palette);
-    return Pressable(
-      borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        child: Row(
-          children: [
-            if (leading != null)
-              Padding(
-                padding: const EdgeInsets.only(right: 14),
-                child: leading!,
-              )
-            else
-              ArtworkTile(
-                entityId: track.id,
-                target: ArtworkTarget.track,
-                size: 48,
-                radius: 10,
-              ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    track.title,
-                    style: text.trackTitle.copyWith(
-                      color: isCurrent ? palette.accent : palette.ink,
+
+    return Padding(
+      // Keep the highlight inset so it reads as a pill on the paper background.
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: isCurrent ? palette.surface : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Pressable(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                if (leading != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 14),
+                    child: leading!,
+                  )
+                else
+                  ArtworkTile(
+                    entityId: track.id,
+                    target: ArtworkTarget.track,
+                    size: 48,
+                    radius: 10,
+                  ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        track.title,
+                        style: text.trackTitle.copyWith(
+                          color: isCurrent ? palette.accent : palette.ink,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        track.artist,
+                        style: text.trackSubtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (isCurrent) ...[
+                  // Live equalizer for the track the player has loaded; the
+                  // frozen (paused) bars keep the row identifiable even when
+                  // a trailing action button is present.
+                  const SizedBox(
+                    width: 44,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: PlayingBars(),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
+                  ?trailing,
+                ] else if (trailing != null)
+                  trailing!
+                else if (showDuration && track.duration > Duration.zero)
                   Text(
-                    track.artist,
-                    style: text.trackSubtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    formatDuration(track.duration),
+                    style: text.metaTertiary,
                   ),
-                ],
-              ),
+              ],
             ),
-            const SizedBox(width: 8),
-            if (trailing != null)
-              trailing!
-            else if (showDuration && track.duration > Duration.zero)
-              Text(formatDuration(track.duration), style: text.metaTertiary),
-          ],
+          ),
         ),
       ),
     );

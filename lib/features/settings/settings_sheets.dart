@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,8 +9,10 @@ import 'package:just_audio/just_audio.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/widgets/common.dart';
+import '../../data/models/library_models.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/player_providers.dart';
+import '../../services/lastfm_service.dart';
 
 /// Opens the system sound settings so the user can pick a real output device.
 const MethodChannel _systemChannel = MethodChannel('monora/system');
@@ -470,6 +474,511 @@ class _BandSlider extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Crossfade
+// ---------------------------------------------------------------------------
+
+Future<void> showCrossfadeSheet(BuildContext context, WidgetRef ref) {
+  final current = ref.read(crossfadeSecondsProvider);
+  return showMonoraSheet(
+    context,
+    title: 'Crossfade Length',
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '$current seconds',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Playfair',
+                  fontWeight: FontWeight.w600,
+                  fontSize: 22,
+                  color: context.monora.ink,
+                ),
+              ),
+              Slider(
+                value: current.toDouble(),
+                min: 1,
+                max: 12,
+                divisions: 11,
+                activeColor: context.monora.accent,
+                inactiveColor: context.monora.surfaceAlt,
+                onChanged: (value) {
+                  setSheetState(() {});
+                  unawaited(
+                    ref.read(crossfadeSecondsProvider.notifier).set(
+                          value.round(),
+                        ),
+                  );
+                },
+              ),
+              Text(
+                'The current song fades out over its final seconds and the '
+                'next one takes over. Works best with several songs queued.',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontWeight: FontWeight.w400,
+                  fontSize: 12,
+                  height: 1.45,
+                  color: context.monora.inkSecondary,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Excluded folders
+// ---------------------------------------------------------------------------
+
+Future<void> showExcludedFoldersSheet(BuildContext context, WidgetRef ref) {
+  return showMonoraSheet(
+    context,
+    title: 'Excluded Folders',
+    builder: (sheetContext) => Consumer(
+      builder: (sheetContext, sheetRef, _) {
+        final folders = sheetRef.watch(excludedFoldersProvider);
+        final palette = sheetContext.monora;
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                'Audio from these folders never appears in your library — '
+                'perfect for recordings, ringtones and chat downloads.',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontWeight: FontWeight.w400,
+                  fontSize: 12,
+                  height: 1.45,
+                  color: palette.inkSecondary,
+                ),
+              ),
+            ),
+            for (final folder in folders)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        folder,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w500,
+                          fontSize: 12.5,
+                          color: palette.ink,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => unawaited(
+                        sheetRef
+                            .read(excludedFoldersProvider.notifier)
+                            .remove(folder),
+                      ),
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 19,
+                        color: palette.heart,
+                      ),
+                      tooltip: 'Include this folder again',
+                    ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+              child: Pressable(
+                onTap: () async {
+                  final result = await FilePickerPlatform.instance
+                      .getDirectoryPath(
+                        dialogTitle: 'Choose a folder to exclude',
+                      );
+                  if (result != null && sheetContext.mounted) {
+                    await sheetRef
+                        .read(excludedFoldersProvider.notifier)
+                        .add(result);
+                  }
+                },
+                borderRadius: BorderRadius.circular(24),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: palette.ink,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Text(
+                    'Add folder to exclude',
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13.5,
+                      color: palette.background,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Playlist backup (export / import)
+// ---------------------------------------------------------------------------
+
+Future<void> showBackupSheet(BuildContext context, WidgetRef ref) {
+  return showMonoraSheet(
+    context,
+    title: 'Backup & Restore',
+    builder: (sheetContext) => Column(
+      children: [
+        _SheetOption(
+          label: 'Export playlists to a file',
+          selected: false,
+          leading: Icon(
+            Icons.file_upload_outlined,
+            size: 20,
+            color: sheetContext.monora.inkSecondary,
+          ),
+          onSelect: () async {
+            Navigator.of(sheetContext).pop();
+            await _exportPlaylists(context, ref);
+          },
+        ),
+        _SheetOption(
+          label: 'Import playlists from a backup',
+          selected: false,
+          leading: Icon(
+            Icons.file_download_outlined,
+            size: 20,
+            color: sheetContext.monora.inkSecondary,
+          ),
+          onSelect: () async {
+            Navigator.of(sheetContext).pop();
+            await _importPlaylists(context, ref);
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+Future<void> _exportPlaylists(BuildContext context, WidgetRef ref) async {
+  try {
+    final playlists = ref.read(playlistsProvider);
+    if (playlists.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No playlists to export yet.')),
+        );
+      }
+      return;
+    }
+    final payload = jsonEncode({
+      'app': 'monora',
+      'version': 1,
+      'playlists': [for (final p in playlists) p.toJson()],
+    });
+    final savedUri = await FilePickerPlatform.instance.saveFile(
+      fileName: 'monora_playlists_backup.json',
+      bytes: utf8.encode(payload),
+      mimeType: 'application/json',
+    );
+    if (context.mounted && savedUri != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Backup saved.')),
+      );
+    }
+  } on Exception {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Export failed. Try again.')),
+      );
+    }
+  }
+}
+
+Future<void> _importPlaylists(BuildContext context, WidgetRef ref) async {
+  try {
+    final files = await FilePickerPlatform.instance.pickFiles(
+      type: FileType.any,
+    );
+    if (files.isEmpty) return;
+    final bytes = await files.first.readAsBytes();
+    final decoded = jsonDecode(utf8.decode(bytes));
+    final rawList = decoded is Map<String, Object?>
+        ? (decoded['playlists'] as List<Object?>?)
+        : (decoded is List ? decoded : null);
+    if (rawList == null) throw const FormatException('bad backup');
+    final imported = [
+      for (final raw in rawList.whereType<Map<String, Object?>>())
+        MonoraPlaylist.fromJson(raw),
+    ];
+    final existing = ref.read(playlistsProvider);
+    final existingIds = existing.map((p) => p.id).toSet();
+    final existingNames = existing.map((p) => p.name.toLowerCase()).toSet();
+    var added = 0;
+    final notifier = ref.read(playlistsProvider.notifier);
+    for (final playlist in imported) {
+      if (existingIds.contains(playlist.id)) continue;
+      var name = playlist.name;
+      var suffix = 2;
+      while (existingNames.contains(name.toLowerCase())) {
+        name = '${playlist.name} ($suffix)';
+        suffix++;
+      }
+      await notifier.create(name, trackIds: playlist.trackIds);
+      existingNames.add(name.toLowerCase());
+      added++;
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            added == 0
+                ? 'Nothing new to import — everything already exists.'
+                : 'Imported $added '
+                    '${added == 1 ? 'playlist' : 'playlists'}.',
+          ),
+        ),
+      );
+    }
+  } on FormatException {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That file is not a Monora backup.')),
+      );
+    }
+  } on Exception {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Import failed. Try again.')),
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Last.fm scrobbling
+// ---------------------------------------------------------------------------
+
+Future<void> showLastFmSheet(BuildContext context, WidgetRef ref) {
+  return showMonoraSheet(
+    context,
+    title: 'Last.fm',
+    builder: (sheetContext) => const _LastFmSheet(),
+  );
+}
+
+class _LastFmSheet extends ConsumerStatefulWidget {
+  const _LastFmSheet();
+
+  @override
+  ConsumerState<_LastFmSheet> createState() => _LastFmSheetState();
+}
+
+class _LastFmSheetState extends ConsumerState<_LastFmSheet> {
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _signingIn = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signIn() async {
+    if (_signingIn) return;
+    setState(() {
+      _signingIn = true;
+      _error = null;
+    });
+    final sessionKey = await LastFmService.authenticate(
+      _usernameController.text.trim(),
+      _passwordController.text,
+    );
+    if (!mounted) return;
+    setState(() => _signingIn = false);
+    if (sessionKey == null || sessionKey.isEmpty) {
+      setState(
+        () => _error = 'Could not sign in. Check your username and password.',
+      );
+      return;
+    }
+    await ref.read(lastFmSessionProvider.notifier).set(sessionKey);
+    await ref.read(lastFmEnabledProvider.notifier).set(true);
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.monora;
+    final session = ref.watch(lastFmSessionProvider);
+    final enabled = ref.watch(lastFmEnabledProvider);
+
+    if (!LastFmConfig.configured) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+        child: Text(
+          'Scrobbling needs Last.fm API credentials. Create a free API '
+          'account at last.fm/api/account/create and add the key and shared '
+          'secret to LastFmConfig in lib/services/lastfm_service.dart.',
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w400,
+            fontSize: 12.5,
+            height: 1.5,
+            color: palette.inkSecondary,
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (session.isNotEmpty) ...[
+            Row(
+              children: [
+                Icon(
+                  Icons.check_circle_rounded,
+                  size: 18,
+                  color: palette.accent,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Signed in — scrobbling ready',
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                      color: palette.ink,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      unawaited(ref.read(lastFmSessionProvider.notifier).set('')),
+                  child: Text('Sign out', style: TextStyle(color: palette.heart)),
+                ),
+              ],
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              activeThumbColor: palette.accent,
+              title: Text(
+                'Scrobble what I play',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                  color: palette.ink,
+                ),
+              ),
+              value: enabled,
+              onChanged: (value) =>
+                  unawaited(ref.read(lastFmEnabledProvider.notifier).set(value)),
+            ),
+          ] else ...[
+            TextField(
+              controller: _usernameController,
+              decoration: const InputDecoration(hintText: 'Last.fm username'),
+              style: TextStyle(color: palette.ink, fontFamily: 'Inter'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(hintText: 'Password'),
+              style: TextStyle(color: palette.ink, fontFamily: 'Inter'),
+              onSubmitted: (_) => unawaited(_signIn()),
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontWeight: FontWeight.w500,
+                    fontSize: 12,
+                    color: palette.heart,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            Pressable(
+              onTap: _signingIn ? null : _signIn,
+              borderRadius: BorderRadius.circular(24),
+              child: Container(
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: palette.ink,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: _signingIn
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(palette.background),
+                        ),
+                      )
+                    : Text(
+                        'Sign in to Last.fm',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                          color: palette.background,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your password is only sent once, directly to Last.fm, to obtain '
+              'a session key. Monora never stores it.',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w400,
+                fontSize: 11,
+                height: 1.4,
+                color: palette.inkTertiary,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -165,8 +165,7 @@ class OnAudioQueryMediaRepository implements MediaRepository {
 }
 
 /// In-memory implementation for tests and (potentially) desktop previews.
-class InMemoryMediaRepository implements MediaRepository {
-  InMemoryMediaRepository({
+class InMemoryMediaRepository implements MediaRepository {  InMemoryMediaRepository({
     this.tracks = const [],
     this.albums = const [],
     this.artists = const [],
@@ -194,4 +193,101 @@ class InMemoryMediaRepository implements MediaRepository {
 
   @override
   Future<Uint8List?> loadArtwork(int id, ArtworkTarget target) async => artwork;
+}
+
+/// Derives album groupings from the (already filtered) track list so that
+/// folder exclusions and the extension filter apply to albums too — the
+/// MediaStore albums table knows nothing about either.
+List<Album> albumsFromTracks(List<Track> tracks) {
+  final byKey = <String, Album>{};
+  final counts = <String, int>{};
+  for (final track in tracks) {
+    final key = 'a${track.albumId ?? track.album}';
+    final existing = byKey[key];
+    if (existing == null) {
+      byKey[key] = Album(
+        id: track.albumId ?? 0,
+        name: track.album,
+        artist: track.artist,
+        artistId: track.artistId,
+        trackCount: 1,
+      );
+    } else {
+      counts[key] = (counts[key] ?? 1) + 1;
+    }
+  }
+  final albums = [
+    for (final entry in byKey.entries)
+      Album(
+        id: entry.value.id,
+        name: entry.value.name,
+        artist: entry.value.artist,
+        artistId: entry.value.artistId,
+        trackCount: counts[entry.key] ?? 1,
+      ),
+  ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  return albums;
+}
+
+/// Derives artist groupings from the (already filtered) track list.
+List<Artist> artistsFromTracks(List<Track> tracks) {
+  final byKey = <String, Artist>{};
+  final trackCounts = <String, int>{};
+  final albumKeys = <String, Set<int>>{};
+  for (final track in tracks) {
+    final key = 'r${track.artistId ?? track.artist}';
+    final existing = byKey[key];
+    if (existing == null) {
+      byKey[key] = Artist(
+        id: track.artistId ?? 0,
+        name: track.artist,
+        albumCount: 0,
+        trackCount: 0,
+      );
+      albumKeys[key] = <int>{};
+    }
+    trackCounts[key] = (trackCounts[key] ?? 0) + 1;
+    final albumId = track.albumId;
+    if (albumId != null) albumKeys[key]!.add(albumId);
+  }
+  final artists = [
+    for (final entry in byKey.entries)
+      Artist(
+        id: entry.value.id,
+        name: entry.value.name,
+        albumCount: albumKeys[entry.key]?.length ?? 0,
+        trackCount: trackCounts[entry.key] ?? 0,
+      ),
+  ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  return artists;
+}
+
+/// Derives the genre distribution from the (already filtered) track list.
+List<GenreStat> genresFromTracks(List<Track> tracks) {
+  final counts = <String, int>{};
+  for (final track in tracks) {
+    final genre = track.genre;
+    if (genre == null) continue;
+    counts[genre] = (counts[genre] ?? 0) + 1;
+  }
+  final stats = [
+    for (final entry in counts.entries)
+      GenreStat(name: entry.key, trackCount: entry.value),
+  ]..sort((a, b) => b.trackCount.compareTo(a.trackCount));
+  return stats;
+}
+
+/// True when [file] lives inside any of the excluded directories. Both sides
+/// are normalized to forward slashes so MediaStore paths always match.
+bool isExcluded(String file, List<String> folders) {
+  if (folders.isEmpty) return false;
+  final normalized = file.replaceAll('\\', '/');
+  for (final folder in folders) {
+    final candidate = folder.replaceAll('\\', '/');
+    final trimmed = candidate.endsWith('/')
+        ? candidate.substring(0, candidate.length - 1)
+        : candidate;
+    if (normalized.startsWith('$trimmed/')) return true;
+  }
+  return false;
 }
