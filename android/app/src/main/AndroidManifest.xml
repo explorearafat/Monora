@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Lets the in-app Settings row request the battery-optimization
+         exemption that keeps background playback alive on aggressive ROMs. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- Only used by the optional, opt-in Last.fm scrobbling. The music
          library itself is read and played entirely offline. -->
     <uses-permission android:name="android.permission.INTERNET"/>

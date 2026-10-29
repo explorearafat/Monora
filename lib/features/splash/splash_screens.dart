@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,6 +55,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       _go(const PermissionScreen());
       return;
     }
+    // Existing installs never saw the notification-permission dialog; ask
+    // once (only while undetermined) so the media notification can appear.
+    unawaited(ref.read(permissionProvider.notifier).ensureNotifications());
     // Warm the library before the shell so Home opens with content ready.
     try {
       await ref.read(libraryProvider.future);

@@ -131,6 +131,29 @@ class PermissionNotifier extends Notifier<PermissionState> {
     }
   }
 
+  /// One-time notification-permission ask for existing installs. On Android
+  /// 13+ the media notification is invisible without POST_NOTIFICATIONS, and
+  /// users who granted audio access in an earlier release never see the
+  /// onboarding request — so the splash flow calls this on every launch and
+  /// it only ever prompts while still undetermined.
+  Future<void> ensureNotifications() async {
+    if (state.audio != LibraryPermissionStatus.granted) return;
+    if (state.notifications != LibraryPermissionStatus.undetermined) return;
+    await requestNotifications();
+  }
+
+  /// Android 14+ / aggressive ROMs kill foreground services that are subject
+  /// to battery optimization. Asking for the exemption is the reliable cure
+  /// for "music stops when I close the app".
+  Future<bool> requestIgnoreBatteryOptimizations() async {
+    try {
+      final status = await Permission.ignoreBatteryOptimizations.request();
+      return status.isGranted;
+    } on Exception {
+      return false;
+    }
+  }
+
   Future<void> openSystemSettings() => openAppSettings();
 }
 

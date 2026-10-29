@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
@@ -172,6 +173,10 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => showBackupSheet(context, ref),
           ),
           const SizedBox(height: 18),
+          _SectionLabel('Reliability'),
+          const _NotificationStatusRow(),
+          const _BatteryRow(),
+          const SizedBox(height: 18),
           if (LastFmConfig.configured) ...[
             _SectionLabel('Connect'),
             _SettingsRow(
@@ -240,7 +245,7 @@ class _SettingsRow extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final String? value;
   final Widget? valueWidget;
   final String? trailing;
@@ -359,6 +364,127 @@ class _SettingsToggleRow extends StatelessWidget {
           Switch(value: value, onChanged: onChanged),
         ],
       ),
+    );
+  }
+}
+
+/// Shows the real notification-permission state and lets the user fix it.
+/// Without POST_NOTIFICATIONS on Android 13+, the media notification (and its
+/// lock-screen controls) never appears.
+class _NotificationStatusRow extends ConsumerStatefulWidget {
+  const _NotificationStatusRow();
+
+  @override
+  ConsumerState<_NotificationStatusRow> createState() =>
+      _NotificationStatusRowState();
+}
+
+class _NotificationStatusRowState extends ConsumerState<_NotificationStatusRow> {
+  @override
+  Widget build(BuildContext context) {
+    final permission = ref.watch(permissionProvider);
+    final palette = context.monora;
+    final status = permission.notifications;
+    final granted = status == LibraryPermissionStatus.granted;
+    final permanentlyDenied =
+        status == LibraryPermissionStatus.permanentlyDenied;
+
+    return _SettingsRow(
+      icon: Icons.notifications_active_outlined,
+      label: 'Media Notification',
+      valueWidget: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            granted ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+            size: 15,
+            color: granted ? palette.accent : palette.heart,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            granted ? 'On' : 'Off',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontWeight: FontWeight.w500,
+              fontSize: 13,
+              color: palette.inkSecondary,
+            ),
+          ),
+        ],
+      ),
+      onTap: granted
+          ? null
+          : permanentlyDenied
+          ? () => unawaited(openAppSettings())
+          : () =>
+                unawaited(ref.read(permissionProvider.notifier).requestNotifications()),
+    );
+  }
+}
+
+/// Exempting Monora from battery optimization is what keeps the foreground
+/// service alive after the app is swiped away on aggressive phones.
+class _BatteryRow extends ConsumerStatefulWidget {
+  const _BatteryRow();
+
+  @override
+  ConsumerState<_BatteryRow> createState() => _BatteryRowState();
+}
+
+class _BatteryRowState extends ConsumerState<_BatteryRow> {
+  bool _exempted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkStatus();
+  }
+
+  Future<void> _checkStatus() async {
+    try {
+      final status = await Permission.ignoreBatteryOptimizations.status;
+      if (mounted) setState(() => _exempted = status.isGranted);
+    } on Exception {
+      // Leave the affordance available regardless.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.monora;
+    return _SettingsRow(
+      icon: Icons.battery_saver_rounded,
+      label: 'Battery Optimization',
+      valueWidget: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _exempted
+                ? Icons.check_circle_rounded
+                : Icons.error_outline_rounded,
+            size: 15,
+            color: _exempted ? palette.accent : palette.heart,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            _exempted ? 'Exempted' : 'Restricted',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontWeight: FontWeight.w500,
+              fontSize: 13,
+              color: palette.inkSecondary,
+            ),
+          ),
+        ],
+      ),
+      onTap: _exempted
+          ? null
+          : () async {
+              final ok = await ref
+                  .read(permissionProvider.notifier)
+                  .requestIgnoreBatteryOptimizations();
+              if (mounted) setState(() => _exempted = ok);
+            },
     );
   }
 }
